@@ -16,9 +16,13 @@ def euclidean_distance(x, y):
 
 class ContentBasedRecommender:
     
-    def __init__(self, data, tfidf):
+    def __init__(self, data, tfidf, music, mood, speed, emotion):
         self.data = data
         self.tfidf = tfidf
+        self.music = music
+        self.mood = mood
+        self.speed = speed
+        self.emotion = emotion
         
     def user_info(self):
         songs = list(self.data['track_name'].values)
@@ -52,22 +56,32 @@ class ContentBasedRecommender:
         
         return [self.music, self.mood, self.speed, self.emotion]
     
-    
-    def recommend_features(self, top=200):
-    
+    def recommend_features(self, top=3000):
         scaler = MinMaxScaler()
 
-        # get the index of the user's favourite track
-        index = self.data[self.data['track_name'] == self.music].index.values
-
-        # 
+        # index = self.data[self.data['track_name'] == self.music].index.values
         track_new = self.data[['danceability', 'energy', 'valence', 'tempo', 'acousticness']]
         track_scaled = scaler.fit_transform(track_new)
-        target_index = track_scaled[index]
+
+        indexes_list = [0, 0, 0 ,0 ,0]
+        for t in self.music:
+            index = self.data[self.data['track_name'] == t].index.values
+            target_index = track_scaled[index]
+            indexes_list[0] += target_index[0][0]
+            indexes_list[1] += target_index[0][1]
+            indexes_list[2] += target_index[0][2]
+            indexes_list[3] += target_index[0][3]
+            indexes_list[4] += target_index[0][4]
+        
+        indexes_list[0] = indexes_list[0] / 5
+        indexes_list[1] = indexes_list[1] / 5
+        indexes_list[2] = indexes_list[2] / 5
+        indexes_list[3] = indexes_list[3] / 5
+        indexes_list[4] = indexes_list[4] / 5
 
         euclidean = []
         for value in track_scaled:
-            eu = euclidean_distance(target_index, value)
+            eu = euclidean_distance(indexes_list, value)
             euclidean.append(eu)
 
         self.data['euclidean_distance'] = euclidean
@@ -79,25 +93,38 @@ class ContentBasedRecommender:
         return result_features[['id','artist_name', 'track_name', 'euclidean_distance']]
 
     
-    def recommend_genre(self, top=200):
+    def recommend_genre(self, top=3000):
         
         # TF-IDF
         tfidf = TfidfVectorizer(ngram_range=(1,2))
         tf_genre = tfidf.fit_transform(self.data.genre)
 
-        # cosine similarity
+        # cosine similarity between the genres
         ts_genre = cosine_similarity(tf_genre, tf_genre)
 
         #Extract specific genre information
-        target_genre_index = self.data[self.data['track_name'] == self.music].index.values
+        list_recommended_genres = []
+        first_loop = True
+        for t in self.music:
+            target_genre_index = self.data[self.data['track_name'] == t].index.values
 
-        # Add similarity data frame for input song
-        self.data["cos_similarity"] = ts_genre[target_genre_index, :].reshape(-1,1)
-        sim_genre = self.data.sort_values(by="cos_similarity", ascending=False)
-        final_index = sim_genre.index.values[ : top]
-        result_genre = self.data.iloc[final_index]
+            # Add similarity data frame for input song
+            self.data["cos_similarity"] = ts_genre[min(target_genre_index), :].reshape(-1,1)
+            sim_genre = self.data.sort_values(by="cos_similarity", ascending=False)
 
-        return result_genre[['id','artist_name', 'track_name', 'cos_similarity']]
+            top_songs_per_genre = int(100 / len(self.music))
+
+            final_index = sim_genre.index.values[ : top_songs_per_genre]
+            result_genre = self.data.iloc[final_index]
+
+            if first_loop:
+                list_recommended_genres = result_genre
+                first_loop = False
+            else:
+                list_recommended_genres = pd.concat([list_recommended_genres, result_genre])
+
+        list_recommended_genres = list_recommended_genres.sort_values(by="cos_similarity", ascending=False)
+        return list_recommended_genres[['id','artist_name', 'track_name', 'cos_similarity']]
     
     def feature_genre_intersection(self, track, recommended_feature, recommended_genre):
         
@@ -114,13 +141,15 @@ class ContentBasedRecommender:
         result_intersection = intersection.sort_values('ratio', ascending=True)
         self.result = pd.merge(track, result_intersection, how='inner').sort_values(by='ratio')
         
+        print(len(self.result))
+        print(self.result)
         return self.result
 
     
     def get_genre_score(self):
-        cosine_sim_score = cosine_similarity(self.tfidf, self.tfidf)
-        target_genre_index = self.result[self.result['track_name'] == self.music].index.values
-        genre_score = cosine_sim_score[target_genre_index, :].reshape(-1, 1)
+        # cosine_sim_score = cosine_similarity(self.tfidf, self.tfidf)
+        # target_genre_index = self.result[self.result['track_name'] == t].index.values
+        # genre_score = cosine_sim_score[target_genre_index, :].reshape(-1, 1)
         genre_score = self.data['cos_similarity']
         return genre_score
 
@@ -156,7 +185,7 @@ class ContentBasedRecommender:
             temp['emotion_score'] = temp.apply(lambda x: 1/3 * ((1-x['danceability_scaled']) + (1-x['energy']) + (1-x['acousticness_reverse'])), axis = 1)
         return temp['emotion_score']
 
-    def get_total_score(self, top_n = 10):
+    def get_total_score(self, top_n = 30):
         result_df = self.result[['artist_name', 'track_name', 'album_name']]
         result_df['mood_score'] = pd.DataFrame(self.get_mood_score())
         result_df['speed_score'] = pd.DataFrame(self.get_speed_score())
