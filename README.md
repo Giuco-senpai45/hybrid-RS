@@ -1,1 +1,1 @@
-# hybrid-RS
+# Actual implementation of the recommender system for JamSpot
